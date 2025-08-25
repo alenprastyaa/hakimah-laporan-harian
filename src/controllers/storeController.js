@@ -1,5 +1,6 @@
 // src/controllers/storeController.js
 const { pool } = require("../config/db");
+const { v4: uuidv4 } = require('uuid');
 
 const createStore = async (req, res) => {
   const { store_name, address, employees } = req.body;
@@ -29,15 +30,11 @@ const createStore = async (req, res) => {
       return res.status(409).json({ message: "Nama toko sudah ada." });
     }
 
+    const store_id = uuidv4();
     const [storeResult] = await connection.query(
-      "INSERT INTO stores (store_name, address) VALUES (?, ?)",
-      [store_name, address]
+      "INSERT INTO stores (store_id, store_name, address) VALUES (?, ?, ?)",
+      [store_id, store_name, address]
     );
-    const [newStore] = await connection.query(
-      "SELECT store_id FROM stores WHERE store_name = ?",
-      [store_name]
-    );
-    const store_id = newStore[0].store_id;
 
     for (const userId of employees) {
       const [userCheck] = await connection.query(

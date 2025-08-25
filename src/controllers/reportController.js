@@ -1,6 +1,7 @@
 // src/controllers/reportController.js
 const { pool } = require("../config/db");
 const { format } = require("date-fns");
+const { v4: uuidv4 } = require('uuid');
 
 const createReport = async (req, res) => {
   const { store_id, report_date, balances, keterangan, uang_nitip } = req.body;
@@ -62,9 +63,11 @@ const createReport = async (req, res) => {
       total_balance += balance.saldo;
     }
 
+    const report_id = uuidv4();
     await connection.query(
-      "INSERT INTO reports (store_id, report_date, total_balance, created_by, keterangan, uang_nitip) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT INTO reports (report_id, store_id, report_date, total_balance, created_by, keterangan, uang_nitip) VALUES (?, ?, ?, ?, ?, ?, ?)",
       [
+        report_id,
         store_id,
         report_date,
         total_balance,
@@ -73,12 +76,6 @@ const createReport = async (req, res) => {
         uang_nitip,
       ]
     );
-
-    const [newReport] = await connection.query(
-      "SELECT report_id FROM reports WHERE store_id = ? AND report_date = ?",
-      [store_id, report_date]
-    );
-    const report_id = newReport[0].report_id;
 
     for (const balance of balances) {
       await connection.query(

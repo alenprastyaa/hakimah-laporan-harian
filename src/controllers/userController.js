@@ -2,6 +2,7 @@
 const { pool } = require("../config/db");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { v4: uuidv4 } = require('uuid');
 require("dotenv").config();
 
 const isValidRole = (role) => ["admin", "karyawan"].includes(role);
@@ -28,17 +29,14 @@ const registerUser = async (req, res) => {
       return res.status(409).json({ message: "Username sudah digunakan." });
     }
     const hashedPassword = await bcrypt.hash(password, 10);
+    const user_id = uuidv4();
     await pool.query(
-      "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
-      [username, hashedPassword, role]
-    );
-    const [newUser] = await pool.query(
-      "SELECT user_id FROM users WHERE username = ?",
-      [username]
+      "INSERT INTO users (user_id, username, password, role) VALUES (?, ?, ?, ?)",
+      [user_id, username, hashedPassword, role]
     );
     res.status(201).json({
       message: "Pengguna berhasil dibuat.",
-      user_id: newUser[0].user_id,
+      user_id,
       username,
       role,
     });

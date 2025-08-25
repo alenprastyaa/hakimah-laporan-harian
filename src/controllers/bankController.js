@@ -1,4 +1,5 @@
 const { pool } = require("../config/db");
+const { v4: uuidv4 } = require('uuid');
 
 const createBank = async (req, res) => {
   const { bank_name, store_id } = req.body;
