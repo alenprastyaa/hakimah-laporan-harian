@@ -2,7 +2,7 @@
 const { pool } = require("../config/db");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const { v4: uuidv4 } = require('uuid');
+const { v4: uuidv4 } = require("uuid");
 require("dotenv").config();
 
 const isValidRole = (role) => ["admin", "karyawan"].includes(role);

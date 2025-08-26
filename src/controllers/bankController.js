@@ -1,5 +1,5 @@
 const { pool } = require("../config/db");
-const { v4: uuidv4 } = require('uuid');
+const { v4: uuidv4 } = require("uuid");
 
 const createBank = async (req, res) => {
   const { bank_name, store_id } = req.body;
@@ -23,19 +23,17 @@ const createBank = async (req, res) => {
       return res.status(404).json({ message: "Toko tidak ditemukan." });
     }
 
-    await pool.query("INSERT INTO banks (bank_name, store_id) VALUES (?, ?)", [
-      bank_name,
-      store_id,
-    ]);
+    // Generate UUID untuk bank_id
+    const bank_id = uuidv4();
 
-    const [newBank] = await pool.query(
-      "SELECT bank_id FROM banks WHERE bank_name = ? AND store_id = ?",
-      [bank_name, store_id]
+    await pool.query(
+      "INSERT INTO banks (bank_id, bank_name, store_id) VALUES (?, ?, ?)",
+      [bank_id, bank_name, store_id]
     );
 
     res.status(201).json({
       message: "Bank/Pembayaran berhasil dibuat.",
-      bank_id: newBank[0].bank_id,
+      bank_id: bank_id,
       bank_name,
       store_id,
     });

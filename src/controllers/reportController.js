@@ -1,7 +1,7 @@
 // src/controllers/reportController.js
 const { pool } = require("../config/db");
 const { format } = require("date-fns");
-const { v4: uuidv4 } = require('uuid');
+const { v4: uuidv4 } = require("uuid");
 
 const createReport = async (req, res) => {
   const { store_id, report_date, balances, keterangan, uang_nitip } = req.body;
@@ -13,11 +13,11 @@ const createReport = async (req, res) => {
     !Array.isArray(balances) ||
     balances.length === 0 ||
     typeof uang_nitip === "undefined" ||
-    typeof uang_nitip !== "number" 
+    typeof uang_nitip !== "number"
   ) {
     return res.status(400).json({
       message:
-        "ID Toko, tanggal laporan, saldo bank, dan uang nitip harus diisi dengan benar.", // [UPDATED MESSAGE]
+        "ID Toko, tanggal laporan, saldo bank, dan uang nitip harus diisi dengan benar.",
     });
   }
 
@@ -63,6 +63,9 @@ const createReport = async (req, res) => {
       total_balance += balance.saldo;
     }
 
+    // Add uang_nitip to total_balance
+    total_balance += uang_nitip;
+
     const report_id = uuidv4();
     await connection.query(
       "INSERT INTO reports (report_id, store_id, report_date, total_balance, created_by, keterangan, uang_nitip) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -77,10 +80,12 @@ const createReport = async (req, res) => {
       ]
     );
 
+    // Generate UUID for each report_balance record
     for (const balance of balances) {
+      const report_balance_id = uuidv4();
       await connection.query(
-        "INSERT INTO report_balances (report_id, bank_id, saldo) VALUES (?, ?, ?)",
-        [report_id, balance.bank_id, balance.saldo]
+        "INSERT INTO report_balances (report_balance_id, report_id, bank_id, saldo) VALUES (?, ?, ?, ?)",
+        [report_balance_id, report_id, balance.bank_id, balance.saldo]
       );
     }
 
@@ -255,11 +260,11 @@ const updateReport = async (req, res) => {
     !Array.isArray(balances) ||
     balances.length === 0 ||
     typeof uang_nitip === "undefined" ||
-    typeof uang_nitip !== "number" // [FIX] Added numeric validation for uang_nitip
+    typeof uang_nitip !== "number"
   ) {
     return res.status(400).json({
       message:
-        "ID Toko, tanggal laporan, saldo bank, dan uang nitip harus diisi dengan benar.", // [UPDATED MESSAGE]
+        "ID Toko, tanggal laporan, saldo bank, dan uang nitip harus diisi dengan benar.",
     });
   }
 
@@ -346,6 +351,7 @@ const updateReport = async (req, res) => {
       total_balance += balance.saldo;
     }
 
+    // Add uang_nitip to total_balance
     total_balance += uang_nitip;
 
     await connection.query(
@@ -357,10 +363,12 @@ const updateReport = async (req, res) => {
       id,
     ]);
 
+    // Generate new UUIDs for updated report_balance records
     for (const balance of balances) {
+      const report_balance_id = uuidv4();
       await connection.query(
-        "INSERT INTO report_balances (report_id, bank_id, saldo) VALUES (?, ?, ?)",
-        [id, balance.bank_id, balance.saldo]
+        "INSERT INTO report_balances (report_balance_id, report_id, bank_id, saldo) VALUES (?, ?, ?, ?)",
+        [report_balance_id, id, balance.bank_id, balance.saldo]
       );
     }
 
@@ -558,6 +566,7 @@ async function hasEmployeeAccessToStore(userId, storeId) {
     return false;
   }
 }
+
 const removeUangNitip = async (req, res) => {
   const { id } = req.params;
   const { user_id, role } = req.user;
@@ -599,10 +608,14 @@ const removeUangNitip = async (req, res) => {
       });
     }
 
-    // Only remove uang_nitip, set it to 0
+    // Calculate new total_balance by subtracting uang_nitip
+    const new_total_balance =
+      currentReport.total_balance - currentReport.uang_nitip;
+
+    // Update both uang_nitip and total_balance
     await connection.query(
-      "UPDATE reports SET uang_nitip = ? WHERE report_id = ?",
-      [0, id]
+      "UPDATE reports SET uang_nitip = ?, total_balance = ? WHERE report_id = ?",
+      [0, new_total_balance, id]
     );
 
     await connection.commit();
@@ -610,6 +623,7 @@ const removeUangNitip = async (req, res) => {
       message: "Uang nitip berhasil dihapus dari laporan.",
       report_id: id,
       new_uang_nitip: 0,
+      new_total_balance: new_total_balance,
       removed_uang_nitip: currentReport.uang_nitip,
     });
   } catch (error) {

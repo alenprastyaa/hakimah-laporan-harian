@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: localhost:3306
--- Waktu pembuatan: 25 Agu 2025 pada 15.36
+-- Waktu pembuatan: 26 Agu 2025 pada 15.11
 -- Versi server: 11.4.7-MariaDB-cll-lve
 -- Versi PHP: 8.4.10
 
@@ -28,7 +28,7 @@ SET time_zone = "+00:00";
 --
 
 CREATE TABLE `banks` (
-  `bank_id` char(36) NOT NULL DEFAULT uuid(),
+  `bank_id` char(36) NOT NULL ,
   `bank_name` varchar(255) NOT NULL,
   `store_id` char(36) DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp()
@@ -152,7 +152,7 @@ INSERT INTO `banks` (`bank_id`, `bank_name`, `store_id`, `created_at`) VALUES
 --
 
 CREATE TABLE `reports` (
-  `report_id` char(36) NOT NULL DEFAULT uuid(),
+  `report_id` char(36) NOT NULL ,
   `store_id` char(36) NOT NULL,
   `report_date` date NOT NULL,
   `total_balance` bigint(20) NOT NULL,
@@ -297,6 +297,7 @@ INSERT INTO `reports` (`report_id`, `store_id`, `report_date`, `total_balance`, 
 ('81676853-7d12-11f0-ab76-246e967de164', '6a76f65e-4cf9-11f0-b3fc-96bb0527ca5d', '2025-08-19', 89015273, '5d8a8d98-4cf9-11f0-b3fc-96bb0527ca5d', '2025-08-19 15:38:11', NULL, 50000000),
 ('817cfb43-6d59-11f0-aa8b-246e967de164', '8f1a0ae2-4280-11f0-aefc-96bb0527ca5d', '2025-07-30', 106690770, '861a4d80-4280-11f0-aefc-96bb0527ca5d', '2025-07-30 15:26:04', NULL, 0),
 ('82fe9d1d-60c3-11f0-9af3-246e967de164', '2ef85a0a-4cf9-11f0-b3fc-96bb0527ca5d', '2025-07-14', 100307940, '375c6f48-4cf8-11f0-b3fc-96bb0527ca5d', '2025-07-14 15:02:10', 'mail 3jt\nsetoran ke =\nismail 500.000\nibu 1.265.000', 0),
+('831ca2b8-822e-11f0-ab50-246e967de164', '4e1dcfb4-4cf9-11f0-b3fc-96bb0527ca5d', '2025-08-25', 100780943, '3de0882c-4cf8-11f0-b3fc-96bb0527ca5d', '2025-08-26 03:41:15', NULL, 0),
 ('836838be-7e9d-11f0-ab50-246e967de164', 'b6414636-427f-11f0-aefc-96bb0527ca5d', '2025-08-21', 100850968, '2cf0dc7e-4cf8-11f0-b3fc-96bb0527ca5d', '2025-08-21 14:45:43', NULL, 0),
 ('836abd95-720d-11f0-9b35-246e967de164', '2ef85a0a-4cf9-11f0-b3fc-96bb0527ca5d', '2025-08-05', 100656227, '375c6f48-4cf8-11f0-b3fc-96bb0527ca5d', '2025-08-05 15:04:41', NULL, 0),
 ('83d78061-6af8-11f0-b9a2-246e967de164', 'b6414636-427f-11f0-aefc-96bb0527ca5d', '2025-07-27', 101836270, '2cf0dc7e-4cf8-11f0-b3fc-96bb0527ca5d', '2025-07-27 14:46:45', NULL, 0),
@@ -3990,7 +3991,21 @@ INSERT INTO `report_balances` (`report_balance_id`, `report_id`, `bank_id`, `sal
 (4080, 'd5491f88-8100-11f0-ab50-246e967de164', 'dfebfc05-53e2-11f0-825a-246e967de164', 1130300),
 (4081, 'd5491f88-8100-11f0-ab50-246e967de164', 'f016a7e2-53e2-11f0-825a-246e967de164', 335889),
 (4082, 'd5491f88-8100-11f0-ab50-246e967de164', '6bdbec18-5049-11f0-9329-246e967de164', 14530000),
-(4083, 'd5491f88-8100-11f0-ab50-246e967de164', '4f74560b-5353-11f0-9c67-246e967de164', 25000000);
+(4083, 'd5491f88-8100-11f0-ab50-246e967de164', '4f74560b-5353-11f0-9c67-246e967de164', 25000000),
+(4085, '831ca2b8-822e-11f0-ab50-246e967de164', '2f3af960-5047-11f0-9329-246e967de164', 27753909),
+(4086, '831ca2b8-822e-11f0-ab50-246e967de164', '67883ba6-53e5-11f0-825a-246e967de164', 5935133),
+(4087, '831ca2b8-822e-11f0-ab50-246e967de164', '36c82c82-5047-11f0-9329-246e967de164', 1681306),
+(4088, '831ca2b8-822e-11f0-ab50-246e967de164', '54512c8b-53e3-11f0-825a-246e967de164', 908790),
+(4089, '831ca2b8-822e-11f0-ab50-246e967de164', 'ac444a29-504c-11f0-9329-246e967de164', 4370191),
+(4090, '831ca2b8-822e-11f0-ab50-246e967de164', '49bbd318-53e3-11f0-825a-246e967de164', 330760),
+(4091, '831ca2b8-822e-11f0-ab50-246e967de164', '31781838-53e3-11f0-825a-246e967de164', 826724),
+(4092, '831ca2b8-822e-11f0-ab50-246e967de164', '3c8b723b-53e3-11f0-825a-246e967de164', 3336300),
+(4093, '831ca2b8-822e-11f0-ab50-246e967de164', '1eac2bd1-53e3-11f0-825a-246e967de164', 3609752),
+(4094, '831ca2b8-822e-11f0-ab50-246e967de164', '5ef66ef6-53e3-11f0-825a-246e967de164', 15864974),
+(4095, '831ca2b8-822e-11f0-ab50-246e967de164', 'dfebfc05-53e2-11f0-825a-246e967de164', 1123304),
+(4096, '831ca2b8-822e-11f0-ab50-246e967de164', 'f016a7e2-53e2-11f0-825a-246e967de164', 1054800),
+(4097, '831ca2b8-822e-11f0-ab50-246e967de164', '6bdbec18-5049-11f0-9329-246e967de164', 10985000),
+(4098, '831ca2b8-822e-11f0-ab50-246e967de164', '4f74560b-5353-11f0-9c67-246e967de164', 23000000);
 
 -- --------------------------------------------------------
 
@@ -3999,7 +4014,7 @@ INSERT INTO `report_balances` (`report_balance_id`, `report_id`, `bank_id`, `sal
 --
 
 CREATE TABLE `stores` (
-  `store_id` char(36) NOT NULL DEFAULT uuid(),
+  `store_id` char(36) NOT NULL ,
   `store_name` varchar(255) NOT NULL,
   `address` text DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp()
@@ -4048,7 +4063,7 @@ INSERT INTO `store_employees` (`store_employee_id`, `store_id`, `user_id`) VALUE
 --
 
 CREATE TABLE `users` (
-  `user_id` char(36) NOT NULL DEFAULT uuid(),
+  `user_id` char(36) NOT NULL ,
   `username` varchar(255) NOT NULL,
   `password` varchar(255) NOT NULL,
   `role` enum('admin','karyawan') NOT NULL,
@@ -4129,7 +4144,7 @@ ALTER TABLE `users`
 -- AUTO_INCREMENT untuk tabel `report_balances`
 --
 ALTER TABLE `report_balances`
-  MODIFY `report_balance_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4084;
+  MODIFY `report_balance_id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4099;
 
 --
 -- AUTO_INCREMENT untuk tabel `store_employees`
