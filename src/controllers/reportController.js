@@ -112,9 +112,73 @@ const createReport = async (req, res) => {
 
 const getAllReports = async (req, res) => {
   const { user_id, role } = req.user;
-  const { store_id, start_date, end_date, creator_id } = req.query;
+  const {
+    store_id,
+    start_date,
+    end_date,
+    creator_id,
+    limit = 10,
+    page = 1,
+  } = req.query;
 
-  let query = `
+  const limitNum = parseInt(limit) || 10;
+  const pageNum = parseInt(page) || 1;
+  const offset = (pageNum - 1) * limitNum;
+
+  let baseQuery = `
+        FROM reports r
+        JOIN stores s ON r.store_id = s.store_id
+        JOIN users u ON r.created_by = u.user_id
+        WHERE 1=1
+    `;
+  const queryParams = [];
+
+  // FILTER KHUSUS KARYAWAN
+  if (role === "karyawan") {
+    baseQuery += ` AND r.store_id IN (SELECT store_id FROM store_employees WHERE user_id = ?)`;
+    queryParams.push(user_id);
+
+    if (store_id && !(await hasEmployeeAccessToStore(user_id, store_id))) {
+      return res.status(403).json({
+        message:
+          "Akses ditolak. Karyawan tidak terhubung dengan toko yang diminta.",
+      });
+    }
+  }
+
+  // FILTER STORE
+  if (store_id) {
+    baseQuery += ` AND r.store_id = ?`;
+    queryParams.push(store_id);
+  }
+
+  // FILTER TANGGAL
+  if (start_date) {
+    baseQuery += ` AND r.report_date >= ?`;
+    queryParams.push(start_date);
+  }
+
+  if (end_date) {
+    baseQuery += ` AND r.report_date <= ?`;
+    queryParams.push(end_date);
+  }
+
+  // FILTER CREATOR
+  if (creator_id && role === "admin") {
+    baseQuery += ` AND r.created_by = ?`;
+    queryParams.push(creator_id);
+  } else if (creator_id && role === "karyawan" && creator_id !== user_id) {
+    return res.status(403).json({
+      message:
+        "Akses ditolak. Karyawan hanya dapat melihat laporan yang dibuat dirinya.",
+    });
+  } else if (role === "karyawan" && !creator_id) {
+    baseQuery += ` AND r.created_by = ?`;
+    queryParams.push(user_id);
+  }
+
+  // QUERY UTAMA
+  const finalQuery = `
         SELECT
             r.report_id,
             r.store_id,
@@ -126,70 +190,53 @@ const getAllReports = async (req, res) => {
             r.created_by,
             u.username AS creator_username,
             r.created_at
-        FROM reports r
-        JOIN stores s ON r.store_id = s.store_id
-        JOIN users u ON r.created_by = u.user_id
-        WHERE 1=1
+        ${baseQuery}
+        ORDER BY r.report_date DESC, r.created_at DESC
+        LIMIT ? OFFSET ?
     `;
-  const queryParams = [];
 
-  if (role === "karyawan") {
-    query += ` AND r.store_id IN (SELECT store_id FROM store_employees WHERE user_id = ?)`;
-    queryParams.push(user_id);
-    if (store_id && !(await hasEmployeeAccessToStore(user_id, store_id))) {
-      return res.status(403).json({
-        message:
-          "Akses ditolak. Karyawan tidak terhubung dengan toko yang diminta.",
-      });
-    }
-  }
-
-  if (store_id) {
-    query += ` AND r.store_id = ?`;
-    queryParams.push(store_id);
-  }
-  if (start_date) {
-    query += ` AND r.report_date >= ?`;
-    queryParams.push(start_date);
-  }
-  if (end_date) {
-    query += ` AND r.report_date <= ?`;
-    queryParams.push(end_date);
-  }
-  if (creator_id && role === "admin") {
-    query += ` AND r.created_by = ?`;
-    queryParams.push(creator_id);
-  } else if (creator_id && role === "karyawan" && creator_id !== user_id) {
-    return res.status(403).json({
-      message:
-        "Akses ditolak. Karyawan hanya dapat melihat laporan yang dibuat oleh dirinya sendiri.",
-    });
-  } else if (role === "karyawan" && !creator_id) {
-    query += ` AND r.created_by = ?`;
-    queryParams.push(user_id);
-  }
-
-  query += ` ORDER BY r.report_date DESC, r.created_at DESC`;
+  // Tambahkan LIMIT & OFFSET ke parameters
+  const dataQueryParams = [...queryParams, limitNum, offset];
 
   try {
-    const [reports] = await pool.query(query, queryParams);
+    // HITUNG TOTAL DATA
+    const countQuery = `
+      SELECT COUNT(*) AS total
+      ${baseQuery}
+    `;
+
+    const [countResult] = await pool.query(countQuery, queryParams);
+    const total = countResult[0].total;
+    const totalPages = Math.ceil(total / limitNum);
+
+    // GET DATA PAGINATED
+    const [reports] = await pool.query(finalQuery, dataQueryParams);
+
+    // GET BALANCE DETAIL
     for (let report of reports) {
       const [balances] = await pool.query(
         `SELECT rb.bank_id, b.bank_name, rb.saldo
-                 FROM report_balances rb
-                 JOIN banks b ON rb.bank_id = b.bank_id
-                 WHERE rb.report_id = ?`,
+         FROM report_balances rb
+         JOIN banks b ON rb.bank_id = b.bank_id
+         WHERE rb.report_id = ?`,
         [report.report_id]
       );
       report.balances_detail = balances;
     }
 
-    res.status(200).json({ reports });
+    res.status(200).json({
+      page: pageNum,
+      limit: limitNum,
+      total,
+      total_pages: totalPages,
+      reports,
+    });
   } catch (error) {
     console.error("Error fetching reports:", error);
-    res
-      .status(500)
-      .json({ message: "Gagal mendapatkan laporan.", error: error.message });
+    res.status(500).json({
+      message: "Gagal mendapatkan laporan.",
+      error: error.message,
+    });
   }
 };
 
