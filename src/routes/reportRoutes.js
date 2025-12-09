@@ -8,6 +8,7 @@ const {
   deleteReport,
   getProfitAnalysis,
   removeUangNitip,
+  getDashboardData,
 } = require("../controllers/reportController");
 const {
   verifyToken,
@@ -43,6 +44,12 @@ router.get(
   verifyToken,
   authorizeRole(["admin", "karyawan"]),
   getAllReports
+);
+router.get(
+  "/dasboard/tes",
+  verifyToken,
+  authorizeRole(["admin", "karyawan"]),
+  getDashboardData
 );
 
 router.get(

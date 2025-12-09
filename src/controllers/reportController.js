@@ -1,8 +1,7 @@
 // src/controllers/reportController.js
 const { pool } = require("../config/db");
-const { format } = require("date-fns");
 const { v4: uuidv4 } = require("uuid");
-
+const { format, subDays, startOfMonth, endOfMonth } = require("date-fns");
 const createReport = async (req, res) => {
   const { store_id, report_date, balances, keterangan, uang_nitip } = req.body;
   const created_by = req.user.user_id;
@@ -685,6 +684,342 @@ const removeUangNitip = async (req, res) => {
   }
 };
 
+const getDashboardData = async (req, res) => {
+  const { user_id, role } = req.user;
+  const {
+    store_id,
+    period = "30",
+    top_stores_limit = "5",
+    recent_limit = "10",
+  } = req.query;
+
+  try {
+    const dashboardData = {};
+
+    // ==========================================
+    // 1. DETERMINE ACCESSIBLE STORES
+    // ==========================================
+    let accessibleStores = [];
+    if (role === "admin") {
+      if (store_id) {
+        const [store] = await pool.query(
+          "SELECT store_id, store_name FROM stores WHERE store_id = ?",
+          [store_id]
+        );
+        accessibleStores = store;
+      } else {
+        const [stores] = await pool.query(
+          "SELECT store_id, store_name FROM stores"
+        );
+        accessibleStores = stores;
+      }
+    } else if (role === "karyawan") {
+      const [stores] = await pool.query(
+        `SELECT s.store_id, s.store_name 
+         FROM stores s
+         JOIN store_employees se ON s.store_id = se.store_id
+         WHERE se.user_id = ?`,
+        [user_id]
+      );
+      accessibleStores = store_id
+        ? stores.filter((s) => s.store_id === store_id)
+        : stores;
+
+      if (store_id && accessibleStores.length === 0) {
+        return res.status(403).json({
+          message: "Akses ditolak. Anda tidak terhubung dengan toko ini.",
+        });
+      }
+    }
+
+    if (accessibleStores.length === 0) {
+      return res.status(404).json({
+        message: "Tidak ada toko yang dapat diakses.",
+      });
+    }
+
+    const storeIds = accessibleStores.map((s) => s.store_id);
+
+    // ==========================================
+    // 2. BASIC STATISTICS
+    // ==========================================
+    dashboardData.overview = {
+      total_stores: accessibleStores.length,
+      accessible_stores: accessibleStores,
+    };
+
+    // Total Reports
+    const [reportCount] = await pool.query(
+      `SELECT COUNT(*) as total FROM reports WHERE store_id IN (?)`,
+      [storeIds]
+    );
+    dashboardData.overview.total_reports = reportCount[0].total;
+
+    // Total Banks/Payment Methods
+    const [bankCount] = await pool.query(
+      `SELECT COUNT(*) as total FROM banks WHERE store_id IN (?)`,
+      [storeIds]
+    );
+    dashboardData.overview.total_banks = bankCount[0].total;
+
+    // Latest Balance
+    const [latestBalance] = await pool.query(
+      `SELECT SUM(total_balance) as balance 
+       FROM reports 
+       WHERE store_id IN (?) 
+       AND report_date = (
+         SELECT MAX(report_date) FROM reports WHERE store_id IN (?)
+       )`,
+      [storeIds, storeIds]
+    );
+    dashboardData.overview.latest_total_balance = latestBalance[0].balance || 0;
+
+    // ==========================================
+    // 3. PERIOD ANALYSIS
+    // ==========================================
+    const periodDays = parseInt(period) || 30;
+    const startDate = format(subDays(new Date(), periodDays), "yyyy-MM-dd");
+    const endDate = format(new Date(), "yyyy-MM-dd");
+
+    dashboardData.period = {
+      days: periodDays,
+      start_date: startDate,
+      end_date: endDate,
+    };
+
+    // Reports in Period
+    const [periodReports] = await pool.query(
+      `SELECT COUNT(*) as total FROM reports 
+       WHERE store_id IN (?) 
+       AND report_date BETWEEN ? AND ?`,
+      [storeIds, startDate, endDate]
+    );
+    dashboardData.period.total_reports = periodReports[0].total;
+
+    // Average Daily Balance
+    const [avgBalance] = await pool.query(
+      `SELECT AVG(total_balance) as average 
+       FROM reports 
+       WHERE store_id IN (?) 
+       AND report_date BETWEEN ? AND ?`,
+      [storeIds, startDate, endDate]
+    );
+    dashboardData.period.average_balance = Math.round(
+      avgBalance[0].average || 0
+    );
+
+    // Total Profit in Period
+    const [firstReport] = await pool.query(
+      `SELECT total_balance FROM reports 
+       WHERE store_id IN (?) 
+       AND report_date >= ?
+       ORDER BY report_date ASC 
+       LIMIT 1`,
+      [storeIds, startDate]
+    );
+
+    const [lastReport] = await pool.query(
+      `SELECT total_balance FROM reports 
+       WHERE store_id IN (?) 
+       AND report_date <= ?
+       ORDER BY report_date DESC 
+       LIMIT 1`,
+      [storeIds, endDate]
+    );
+
+    const firstBalance =
+      firstReport.length > 0 ? firstReport[0].total_balance : 0;
+    const lastBalance = lastReport.length > 0 ? lastReport[0].total_balance : 0;
+    dashboardData.period.total_profit = lastBalance - firstBalance;
+    dashboardData.period.profit_percentage =
+      firstBalance > 0
+        ? ((dashboardData.period.total_profit / firstBalance) * 100).toFixed(2)
+        : 0;
+
+    // Total Uang Nitip
+    const [totalUangNitip] = await pool.query(
+      `SELECT SUM(uang_nitip) as total 
+       FROM reports 
+       WHERE store_id IN (?) 
+       AND report_date BETWEEN ? AND ?`,
+      [storeIds, startDate, endDate]
+    );
+    dashboardData.period.total_uang_nitip = totalUangNitip[0].total || 0;
+
+    // Reports by Store
+    const [reportsByStore] = await pool.query(
+      `SELECT s.store_name, s.store_id, COUNT(r.report_id) as report_count
+       FROM stores s
+       LEFT JOIN reports r ON s.store_id = r.store_id 
+         AND r.report_date BETWEEN ? AND ?
+       WHERE s.store_id IN (?)
+       GROUP BY s.store_id, s.store_name
+       ORDER BY report_count DESC`,
+      [startDate, endDate, storeIds]
+    );
+    dashboardData.period.reports_by_store = reportsByStore;
+
+    // ==========================================
+    // 4. DAILY BALANCE TREND (for chart)
+    // ==========================================
+    const [dailyBalances] = await pool.query(
+      `SELECT 
+         report_date,
+         SUM(total_balance) as total_balance,
+         SUM(uang_nitip) as total_uang_nitip,
+         COUNT(DISTINCT store_id) as store_count
+       FROM reports
+       WHERE store_id IN (?)
+       AND report_date BETWEEN ? AND ?
+       GROUP BY report_date
+       ORDER BY report_date ASC`,
+      [storeIds, startDate, endDate]
+    );
+    dashboardData.daily_balance_trend = dailyBalances;
+
+    // ==========================================
+    // 5. PROFIT TREND (daily profit calculation)
+    // ==========================================
+    const profitTrend = [];
+    for (let i = 1; i < dailyBalances.length; i++) {
+      const profit =
+        dailyBalances[i].total_balance - dailyBalances[i - 1].total_balance;
+      profitTrend.push({
+        date: dailyBalances[i].report_date,
+        profit: profit,
+        previous_balance: dailyBalances[i - 1].total_balance,
+        current_balance: dailyBalances[i].total_balance,
+      });
+    }
+    dashboardData.profit_trend = profitTrend;
+
+    // ==========================================
+    // 6. TOP PERFORMING STORES
+    // ==========================================
+    const topStoresLimit = parseInt(top_stores_limit) || 5;
+    const [topStores] = await pool.query(
+      `SELECT 
+         s.store_id,
+         s.store_name,
+         COUNT(DISTINCT r.report_id) as total_reports,
+         AVG(r.total_balance) as avg_balance,
+         MAX(r.total_balance) as max_balance,
+         MIN(r.total_balance) as min_balance,
+         (MAX(r.total_balance) - MIN(r.total_balance)) as balance_growth
+       FROM stores s
+       LEFT JOIN reports r ON s.store_id = r.store_id
+         AND r.report_date BETWEEN ? AND ?
+       WHERE s.store_id IN (?)
+       GROUP BY s.store_id, s.store_name
+       HAVING total_reports > 0
+       ORDER BY balance_growth DESC
+       LIMIT ?`,
+      [startDate, endDate, storeIds, topStoresLimit]
+    );
+    dashboardData.top_stores = topStores;
+
+    // ==========================================
+    // 7. RECENT ACTIVITIES
+    // ==========================================
+    const recentLimit = parseInt(recent_limit) || 10;
+    const [activities] = await pool.query(
+      `SELECT 
+         r.report_id,
+         r.store_id,
+         s.store_name,
+         r.report_date,
+         r.total_balance,
+         r.uang_nitip,
+         r.keterangan,
+         r.created_by,
+         u.username as creator_name,
+         r.created_at
+       FROM reports r
+       JOIN stores s ON r.store_id = s.store_id
+       JOIN users u ON r.created_by = u.user_id
+       WHERE r.store_id IN (?)
+       ORDER BY r.created_at DESC
+       LIMIT ?`,
+      [storeIds, recentLimit]
+    );
+    dashboardData.recent_activities = activities;
+
+    // ==========================================
+    // 8. MONTHLY COMPARISON
+    // ==========================================
+    const currentDate = new Date();
+    const currentMonthStart = format(startOfMonth(currentDate), "yyyy-MM-dd");
+    const currentMonthEnd = format(endOfMonth(currentDate), "yyyy-MM-dd");
+
+    const lastMonthDate = subDays(currentDate, 30);
+    const lastMonthStart = format(startOfMonth(lastMonthDate), "yyyy-MM-dd");
+    const lastMonthEnd = format(endOfMonth(lastMonthDate), "yyyy-MM-dd");
+
+    // Current month stats
+    const [currentMonth] = await pool.query(
+      `SELECT 
+         COUNT(*) as total_reports,
+         AVG(total_balance) as avg_balance,
+         SUM(uang_nitip) as total_uang_nitip
+       FROM reports
+       WHERE store_id IN (?)
+       AND report_date BETWEEN ? AND ?`,
+      [storeIds, currentMonthStart, currentMonthEnd]
+    );
+
+    // Last month stats
+    const [lastMonth] = await pool.query(
+      `SELECT 
+         COUNT(*) as total_reports,
+         AVG(total_balance) as avg_balance,
+         SUM(uang_nitip) as total_uang_nitip
+       FROM reports
+       WHERE store_id IN (?)
+       AND report_date BETWEEN ? AND ?`,
+      [storeIds, lastMonthStart, lastMonthEnd]
+    );
+
+    dashboardData.monthly_comparison = {
+      current_month: {
+        period: `${currentMonthStart} to ${currentMonthEnd}`,
+        total_reports: currentMonth[0].total_reports,
+        avg_balance: Math.round(currentMonth[0].avg_balance || 0),
+        total_uang_nitip: currentMonth[0].total_uang_nitip || 0,
+      },
+      last_month: {
+        period: `${lastMonthStart} to ${lastMonthEnd}`,
+        total_reports: lastMonth[0].total_reports,
+        avg_balance: Math.round(lastMonth[0].avg_balance || 0),
+        total_uang_nitip: lastMonth[0].total_uang_nitip || 0,
+      },
+      growth: {
+        reports: currentMonth[0].total_reports - lastMonth[0].total_reports,
+        avg_balance: Math.round(
+          (currentMonth[0].avg_balance || 0) - (lastMonth[0].avg_balance || 0)
+        ),
+        uang_nitip:
+          (currentMonth[0].total_uang_nitip || 0) -
+          (lastMonth[0].total_uang_nitip || 0),
+      },
+    };
+
+    // ==========================================
+    // 9. RESPONSE
+    // ==========================================
+    res.status(200).json({
+      message: "Dashboard data retrieved successfully.",
+      role,
+      data: dashboardData,
+    });
+  } catch (error) {
+    console.error("Error fetching dashboard data:", error);
+    res.status(500).json({
+      message: "Gagal mendapatkan data dashboard.",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   removeUangNitip,
   createReport,
@@ -693,4 +1028,5 @@ module.exports = {
   updateReport,
   deleteReport,
   getProfitAnalysis,
+  getDashboardData,
 };
