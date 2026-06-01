@@ -5,6 +5,8 @@ const jwt = require("jsonwebtoken");
 const { v4: uuidv4 } = require("uuid");
 require("dotenv").config();
 
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "24h";
+
 const isValidRole = (role) => ["admin", "karyawan"].includes(role);
 
 const registerUser = async (req, res) => {
@@ -72,7 +74,7 @@ const loginUser = async (req, res) => {
     const token = jwt.sign(
       { user_id: user.user_id, username: user.username, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: "1h" }
+      { expiresIn: JWT_EXPIRES_IN }
     );
     res.status(200).json({
       message: "Login berhasil.",

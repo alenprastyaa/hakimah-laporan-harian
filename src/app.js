@@ -2,6 +2,7 @@
 const express = require("express");
 const cors = require("cors");
 const { testConnection } = require("./config/db");
+const { initializeDatabase } = require("./config/initDb");
 require("dotenv").config();
 
 const { format, subDays, startOfMonth, endOfMonth } = require("date-fns");
@@ -11,13 +12,14 @@ const userRoutes = require("./routes/userRoutes");
 const storeRoutes = require("./routes/storeRoutes");
 const bankRoutes = require("./routes/bankRoutes");
 const reportRoutes = require("./routes/reportRoutes");
+const withdrawalRoutes = require("./routes/withdrawalRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
-app.use(express.json()); // Body parser untuk JSON
-app.use(express.urlencoded({ extended: true })); // Body parser untuk URL-encoded
+app.use(express.json({ limit: "10mb" })); // Body parser untuk JSON
+app.use(express.urlencoded({ extended: true, limit: "10mb" })); // Body parser untuk URL-encoded
 
 // Konfigurasi CORS yang lebih komprehensif
 const corsOptions = {
@@ -83,14 +85,12 @@ app.use((req, res, next) => {
   next();
 });
 
-// Uji koneksi database saat aplikasi dimulai
-testConnection();
-
 // Definisikan rute API
 app.use("/api/users", userRoutes);
 app.use("/api/stores", storeRoutes);
 app.use("/api/banks", bankRoutes);
 app.use("/api/reports", reportRoutes);
+app.use("/api/withdrawals", withdrawalRoutes);
 
 // Rute dasar
 app.get("/", (req, res) => {
@@ -105,9 +105,20 @@ app.use((err, req, res, next) => {
     .json({ message: "Terjadi kesalahan pada server.", error: err.message });
 });
 
-// Jalankan server
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+const bootstrap = async () => {
+  await testConnection();
+  await initializeDatabase();
+
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
+  });
+
+  console.log("✨ Database initialization completed!");
+};
+
+bootstrap().catch((error) => {
+  console.error("❌ Failed to start application:", error.message);
+  process.exit(1);
 });
 
 module.exports = app;

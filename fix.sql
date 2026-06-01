@@ -4182,6 +4182,35 @@ ALTER TABLE `report_balances`
 ALTER TABLE `store_employees`
   ADD CONSTRAINT `store_employees_ibfk_1` FOREIGN KEY (`store_id`) REFERENCES `stores` (`store_id`) ON DELETE CASCADE,
   ADD CONSTRAINT `store_employees_ibfk_2` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE;
+
+--
+-- Ketidakleluasaan untuk tabel `withdrawals`
+--
+CREATE TABLE IF NOT EXISTS `withdrawals` (
+  `withdrawal_id` char(36) NOT NULL,
+  `withdrawal_name` varchar(150) NOT NULL,
+  `amount` decimal(15,2) NOT NULL,
+  `ktp_file_name` varchar(255) NOT NULL,
+  `ktp_file_key` varchar(500) NOT NULL,
+  `ktp_file_url` varchar(1000) NOT NULL,
+  `ktp_ocr_status` varchar(30) DEFAULT 'pending',
+  `ktp_ocr_text` text DEFAULT NULL,
+  `ktp_ocr_error` varchar(500) DEFAULT NULL,
+  `ktp_nik` varchar(32) DEFAULT NULL,
+  `ktp_name` varchar(150) DEFAULT NULL,
+  `ktp_birth_place` varchar(100) DEFAULT NULL,
+  `ktp_birth_date` date DEFAULT NULL,
+  `ktp_gender` varchar(30) DEFAULT NULL,
+  `ktp_address` text DEFAULT NULL,
+  `created_by` char(36) NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`withdrawal_id`),
+  KEY `idx_withdrawals_created_by` (`created_by`),
+  KEY `idx_withdrawals_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+ALTER TABLE `withdrawals`
+  ADD CONSTRAINT `fk_withdrawals_created_by` FOREIGN KEY (`created_by`) REFERENCES `users` (`user_id`) ON DELETE CASCADE ON UPDATE CASCADE;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
