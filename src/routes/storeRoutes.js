@@ -17,7 +17,7 @@ const router = express.Router();
 // Membuat toko (hanya admin)
 router.post("/", verifyToken, authorizeRole(["admin"]), createStore);
 
-// Mendapatkan semua toko (admin dapat melihat semua, karyawan hanya yang terkait)
+
 router.get(
   "/",
   verifyToken,
