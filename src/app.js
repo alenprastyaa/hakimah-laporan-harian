@@ -13,6 +13,8 @@ const storeRoutes = require("./routes/storeRoutes");
 const bankRoutes = require("./routes/bankRoutes");
 const reportRoutes = require("./routes/reportRoutes");
 const withdrawalRoutes = require("./routes/withdrawalRoutes");
+const whatsappReportRoutes = require("./routes/whatsappReportRoutes");
+const { startWhatsappReportScheduler } = require("./services/whatsappReportScheduler");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -91,6 +93,7 @@ app.use("/api/stores", storeRoutes);
 app.use("/api/banks", bankRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/withdrawals", withdrawalRoutes);
+app.use("/api/whatsapp-reports", whatsappReportRoutes);
 
 // Rute dasar
 app.get("/", (req, res) => {
@@ -112,6 +115,8 @@ const bootstrap = async () => {
   app.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
   });
+
+  startWhatsappReportScheduler();
 
   console.log("✨ Database initialization completed!");
 };

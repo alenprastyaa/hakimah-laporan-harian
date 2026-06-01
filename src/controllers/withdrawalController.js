@@ -247,68 +247,68 @@ const createWithdrawal = async (req, res) => {
 
 const getAllWithdrawals = async (req, res) => {
   const { user_id, role } = req.user;
+  const search = String(req.query.search || "").trim();
+  const searchDigits = search.replace(/\D/g, "");
 
   try {
-    const query =
-      role === "admin"
-        ? `
-          SELECT
-            w.withdrawal_id,
-            w.withdrawal_name,
-            w.amount,
-            w.ktp_file_name,
-            w.ktp_file_key,
-            w.ktp_file_url,
-            w.ktp_ocr_status,
-            w.ktp_ocr_text,
-            w.ktp_ocr_error,
-            w.ktp_nik,
-            w.ktp_name,
-            w.ktp_birth_place,
-            w.ktp_birth_date,
-            w.ktp_gender,
-            w.ktp_address,
-            w.created_by,
-            w.created_at,
-            u.username AS created_by_username,
-            u.role AS created_by_role
-          FROM withdrawals w
-          LEFT JOIN users u ON u.user_id = w.created_by
-          ORDER BY w.created_at DESC
-        `
-        : `
-          SELECT
-            w.withdrawal_id,
-            w.withdrawal_name,
-            w.amount,
-            w.ktp_file_name,
-            w.ktp_file_key,
-            w.ktp_file_url,
-            w.ktp_ocr_status,
-            w.ktp_ocr_text,
-            w.ktp_ocr_error,
-            w.ktp_nik,
-            w.ktp_name,
-            w.ktp_birth_place,
-            w.ktp_birth_date,
-            w.ktp_gender,
-            w.ktp_address,
-            w.created_by,
-            w.created_at,
-            u.username AS created_by_username,
-            u.role AS created_by_role
-          FROM withdrawals w
-          LEFT JOIN users u ON u.user_id = w.created_by
-          WHERE w.created_by = ?
-          ORDER BY w.created_at DESC
-        `;
+    const whereClauses = [];
+    const params = [];
 
+    if (role !== "admin") {
+      whereClauses.push("w.created_by = ?");
+      params.push(user_id);
+    }
+
+    if (search) {
+      const searchLike = `%${search}%`;
+      const searchConditions = [
+        "w.withdrawal_name LIKE ?",
+        "w.ktp_name LIKE ?",
+        "w.ktp_nik LIKE ?",
+        "CAST(w.amount AS CHAR) LIKE ?",
+      ];
+      params.push(searchLike, searchLike, searchLike, searchLike);
+
+      if (searchDigits) {
+        searchConditions.push("REPLACE(CAST(w.amount AS CHAR), '.', '') LIKE ?");
+        params.push(`%${searchDigits}%`);
+      }
+
+      whereClauses.push(`(${searchConditions.join(" OR ")})`);
+    }
+
+    const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
     const [withdrawals] = await pool.query(
-      query,
-      role === "admin" ? [] : [user_id],
+      `
+      SELECT
+        w.withdrawal_id,
+        w.withdrawal_name,
+        w.amount,
+        w.ktp_file_name,
+        w.ktp_file_key,
+        w.ktp_file_url,
+        w.ktp_ocr_status,
+        w.ktp_ocr_text,
+        w.ktp_ocr_error,
+        w.ktp_nik,
+        w.ktp_name,
+        w.ktp_birth_place,
+        w.ktp_birth_date,
+        w.ktp_gender,
+        w.ktp_address,
+        w.created_by,
+        w.created_at,
+        u.username AS created_by_username,
+        u.role AS created_by_role
+      FROM withdrawals w
+      LEFT JOIN users u ON u.user_id = w.created_by
+      ${whereSql}
+      ORDER BY w.created_at DESC
+      `,
+      params,
     );
 
-    res.status(200).json({ withdrawals });
+    res.status(200).json({ withdrawals, search });
   } catch (error) {
     console.error("Error fetching withdrawals:", error);
     res.status(500).json({

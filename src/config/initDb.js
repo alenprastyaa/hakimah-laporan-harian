@@ -57,6 +57,75 @@ const initializeDatabase = async () => {
   await addColumnIfMissing("withdrawals", "ktp_birth_date", "DATE NULL");
   await addColumnIfMissing("withdrawals", "ktp_gender", "VARCHAR(30) NULL");
   await addColumnIfMissing("withdrawals", "ktp_address", "TEXT NULL");
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS whatsapp_recipients (
+      recipient_id CHAR(36) NOT NULL,
+      name VARCHAR(150) NOT NULL,
+      phone_number VARCHAR(30) NOT NULL,
+      is_active TINYINT(1) NOT NULL DEFAULT 1,
+      created_by VARCHAR(36) NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (recipient_id),
+      UNIQUE KEY uq_whatsapp_recipients_phone_number (phone_number),
+      KEY idx_whatsapp_recipients_is_active (is_active)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS whatsapp_report_sends (
+      send_id CHAR(36) NOT NULL,
+      report_date DATE NOT NULL,
+      pdf_file_key VARCHAR(500) NOT NULL,
+      pdf_file_url VARCHAR(1000) NOT NULL,
+      recipient_id CHAR(36) NULL,
+      phone_number VARCHAR(30) NOT NULL,
+      status VARCHAR(30) NOT NULL,
+      provider_response TEXT NULL,
+      error_message TEXT NULL,
+      sent_by VARCHAR(36) NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (send_id),
+      KEY idx_whatsapp_report_sends_report_date (report_date),
+      KEY idx_whatsapp_report_sends_status (status),
+      KEY idx_whatsapp_report_sends_recipient_id (recipient_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS whatsapp_report_schedules (
+      schedule_id CHAR(36) NOT NULL,
+      scheduled_time TIME NOT NULL,
+      is_active TINYINT(1) NOT NULL DEFAULT 1,
+      created_by VARCHAR(36) NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (schedule_id),
+      UNIQUE KEY uq_whatsapp_report_schedules_time (scheduled_time),
+      KEY idx_whatsapp_report_schedules_is_active (is_active)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS whatsapp_report_schedule_runs (
+      run_id CHAR(36) NOT NULL,
+      schedule_id CHAR(36) NOT NULL,
+      report_date DATE NOT NULL,
+      scheduled_time TIME NOT NULL,
+      status VARCHAR(30) NOT NULL,
+      sent_count INT NOT NULL DEFAULT 0,
+      failed_count INT NOT NULL DEFAULT 0,
+      pdf_file_url VARCHAR(1000) NULL,
+      error_message TEXT NULL,
+      started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      finished_at TIMESTAMP NULL,
+      PRIMARY KEY (run_id),
+      UNIQUE KEY uq_whatsapp_report_schedule_runs_once (schedule_id, report_date, scheduled_time),
+      KEY idx_whatsapp_report_schedule_runs_report_date (report_date),
+      KEY idx_whatsapp_report_schedule_runs_status (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+  `);
 };
 
 module.exports = { initializeDatabase };
