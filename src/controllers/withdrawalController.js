@@ -4,6 +4,7 @@ const {
   uploadBufferToR2,
   deleteObjectFromR2,
   decodeBase64File,
+  createPresignedPutUrl,
   sanitizeFileName,
 } = require("../utils/r2");
 const { recognizeKtp } = require("../utils/ktpOcr");
@@ -25,6 +26,27 @@ const cleanText = (value) => {
   return normalized || null;
 };
 
+const isAllowedMimeType = (mimeType) => ALLOWED_MIME_TYPES.includes(String(mimeType || ""));
+
+const buildWithdrawalFileKey = (fileName) => {
+  const withdrawalId = uuidv4();
+  const safeFileName = sanitizeFileName(fileName);
+  const createdAt = new Date();
+  const datePrefix = createdAt.toISOString().slice(0, 10).replace(/-/g, "/");
+  return `withdrawals/${datePrefix}/${withdrawalId}-${safeFileName}`;
+};
+
+const getPublicR2Url = (key) =>
+  `${String(process.env.R2_PUBLIC_BASE_URL || "").replace(/\/+$/, "")}/${key}`;
+
+const isValidWithdrawalR2File = ({ key, url }) => {
+  const normalizedKey = cleanText(key);
+  const normalizedUrl = cleanText(url);
+  if (!normalizedKey || !normalizedUrl) return false;
+  if (!normalizedKey.startsWith("withdrawals/")) return false;
+  return normalizedUrl === getPublicR2Url(normalizedKey);
+};
+
 const validateAndDecodeKtpFile = ({ ktp_file_data }) => {
   if (!ktp_file_data) {
     const error = new Error("Foto KTP harus diunggah.");
@@ -40,7 +62,7 @@ const validateAndDecodeKtpFile = ({ ktp_file_data }) => {
     throw decodeError;
   }
 
-  if (!ALLOWED_MIME_TYPES.includes(decodedFile.mimeType)) {
+  if (!isAllowedMimeType(decodedFile.mimeType)) {
     const error = new Error("Format foto KTP harus JPG, JPEG, PNG, atau WEBP.");
     error.statusCode = 400;
     throw error;
@@ -53,6 +75,16 @@ const validateAndDecodeKtpFile = ({ ktp_file_data }) => {
   }
 
   return decodedFile;
+};
+
+const fetchKtpBufferFromUrl = async (url) => {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Gagal mengambil foto KTP dari R2 (${response.status}).`);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer);
 };
 
 const scanKtp = async (buffer) => {
@@ -143,6 +175,59 @@ const updateWithdrawalOcr = async (withdrawalId, buffer, body) => {
   }
 };
 
+const updateWithdrawalOcrFromUrl = async (withdrawalId, fileUrl, body) => {
+  try {
+    const buffer = await fetchKtpBufferFromUrl(fileUrl);
+    await updateWithdrawalOcr(withdrawalId, buffer, body);
+  } catch (error) {
+    console.error("Error reading withdrawal KTP for OCR:", error);
+    await pool.query(
+      `
+      UPDATE withdrawals
+      SET ktp_ocr_status = ?, ktp_ocr_error = ?
+      WHERE withdrawal_id = ?
+      `,
+      ["failed", (error.message || "Gagal membaca foto KTP dari R2.").slice(0, 500), withdrawalId],
+    );
+  }
+};
+
+const createKtpUploadUrl = async (req, res) => {
+  try {
+    const fileName = cleanText(req.body.ktp_file_name);
+    const mimeType = cleanText(req.body.ktp_mime_type);
+    const fileSize = Number(req.body.ktp_file_size || 0);
+
+    if (!fileName) {
+      return res.status(400).json({ message: "Nama file KTP harus diisi." });
+    }
+
+    if (!isAllowedMimeType(mimeType)) {
+      return res.status(400).json({ message: "Format foto KTP harus JPG, JPEG, PNG, atau WEBP." });
+    }
+
+    if (!Number.isFinite(fileSize) || fileSize <= 0 || fileSize > MAX_WITHDRAWAL_FILE_SIZE) {
+      return res.status(400).json({ message: "Ukuran foto KTP maksimal 5 MB." });
+    }
+
+    const key = buildWithdrawalFileKey(fileName);
+    const signedUpload = createPresignedPutUrl({ key });
+
+    return res.status(200).json({
+      upload_url: signedUpload.uploadUrl,
+      ktp_file_key: signedUpload.key,
+      ktp_file_url: signedUpload.url,
+      expires_in: signedUpload.expiresIn,
+    });
+  } catch (error) {
+    console.error("Error creating KTP upload URL:", error);
+    return res.status(500).json({
+      message: "Gagal membuat URL upload KTP.",
+      error: error.message,
+    });
+  }
+};
+
 const ocrKtp = async (req, res) => {
   try {
     const decodedFile = validateAndDecodeKtpFile(req.body);
@@ -163,7 +248,8 @@ const ocrKtp = async (req, res) => {
 };
 
 const createWithdrawal = async (req, res) => {
-  const { withdrawal_name, amount, ktp_file_name, ktp_file_data } = req.body;
+  const { withdrawal_name, amount, ktp_file_name, ktp_file_data, ktp_file_key, ktp_file_url } =
+    req.body;
   const createdBy = req.user?.user_id;
 
   if (!withdrawal_name || !String(withdrawal_name).trim()) {
@@ -175,22 +261,24 @@ const createWithdrawal = async (req, res) => {
     return res.status(400).json({ message: "Jumlah penarikan harus lebih dari 0." });
   }
 
-  if (!ktp_file_name || !ktp_file_data) {
+  if (!ktp_file_name || (!ktp_file_data && (!ktp_file_key || !ktp_file_url))) {
     return res.status(400).json({ message: "Foto KTP harus diunggah." });
   }
 
-  let decodedFile;
-  try {
-    decodedFile = validateAndDecodeKtpFile(req.body);
-  } catch (error) {
-    return res.status(400).json({ message: error.message });
+  let decodedFile = null;
+  if (ktp_file_data) {
+    try {
+      decodedFile = validateAndDecodeKtpFile(req.body);
+    } catch (error) {
+      return res.status(400).json({ message: error.message });
+    }
+  } else if (!isValidWithdrawalR2File({ key: ktp_file_key, url: ktp_file_url })) {
+    return res.status(400).json({ message: "File KTP R2 tidak valid." });
   }
 
   const withdrawalId = uuidv4();
-  const safeFileName = sanitizeFileName(ktp_file_name);
   const createdAt = new Date();
-  const datePrefix = createdAt.toISOString().slice(0, 10).replace(/-/g, "/");
-  const r2Key = `withdrawals/${datePrefix}/${withdrawalId}-${safeFileName}`;
+  let uploadedKeyForCleanup = null;
 
   try {
     const hasOcrPayload =
@@ -210,11 +298,17 @@ const createWithdrawal = async (req, res) => {
         };
     const ktpFields = buildKtpFields(req.body, ocrFields);
 
-    const uploaded = await uploadBufferToR2({
-      key: r2Key,
-      buffer: decodedFile.buffer,
-      contentType: decodedFile.mimeType,
-    });
+    const uploaded = decodedFile
+      ? await uploadBufferToR2({
+          key: buildWithdrawalFileKey(ktp_file_name),
+          buffer: decodedFile.buffer,
+          contentType: decodedFile.mimeType,
+        })
+      : {
+          key: ktp_file_key,
+          url: ktp_file_url,
+        };
+    uploadedKeyForCleanup = uploaded.key;
 
     await pool.query(
       `
@@ -284,10 +378,15 @@ const createWithdrawal = async (req, res) => {
 
     if (!hasOcrPayload) {
       setImmediate(() => {
-        updateWithdrawalOcr(withdrawalId, decodedFile.buffer, {
+        const ocrBody = {
           ...req.body,
           withdrawal_name: String(withdrawal_name).trim(),
-        }).catch((error) => {
+        };
+        const ocrPromise = decodedFile
+          ? updateWithdrawalOcr(withdrawalId, decodedFile.buffer, ocrBody)
+          : updateWithdrawalOcrFromUrl(withdrawalId, uploaded.url, ocrBody);
+
+        ocrPromise.catch((error) => {
           console.error("Unhandled withdrawal OCR update error:", error);
         });
       });
@@ -296,10 +395,12 @@ const createWithdrawal = async (req, res) => {
     return res.status(201).json(responsePayload);
   } catch (error) {
     console.error("Error creating withdrawal:", error);
-    try {
-      await deleteObjectFromR2(r2Key);
-    } catch (cleanupError) {
-      console.error("Error cleaning up uploaded withdrawal file:", cleanupError);
+    if (uploadedKeyForCleanup) {
+      try {
+        await deleteObjectFromR2(uploadedKeyForCleanup);
+      } catch (cleanupError) {
+        console.error("Error cleaning up uploaded withdrawal file:", cleanupError);
+      }
     }
 
     return res.status(500).json({
@@ -470,6 +571,7 @@ const deleteWithdrawal = async (req, res) => {
 
 module.exports = {
   ocrKtp,
+  createKtpUploadUrl,
   createWithdrawal,
   getAllWithdrawals,
   getWithdrawalById,

@@ -41,6 +41,11 @@ const sha256Hex = (value) => crypto.createHash("sha256").update(value).digest("h
 
 const hmac = (key, value) => crypto.createHmac("sha256", key).update(value).digest();
 
+const encodeRfc3986 = (value) =>
+  encodeURIComponent(value).replace(/[!'()*]/g, (char) =>
+    `%${char.charCodeAt(0).toString(16).toUpperCase()}`
+  );
+
 const getSignatureKey = (secretAccessKey, dateStamp, region, service) => {
   const kDate = hmac(`AWS4${secretAccessKey}`, dateStamp);
   const kRegion = hmac(kDate, region);
@@ -80,7 +85,7 @@ const signRequest = ({ method, url, headers, body, accessKeyId, secretAccessKey 
   const dateStamp = formatDateStamp(amzDate);
   const payloadHash = headers["x-amz-content-sha256"] || sha256Hex(body);
   const canonicalUri = encodeS3Path(url.pathname);
-  const canonicalQueryString = url.searchParams.toString();
+  const canonicalQueryString = buildCanonicalQueryString(url.searchParams);
   const { canonicalHeaders, signedHeaders } = buildCanonicalHeaders(headers);
   const canonicalRequest = [
     method.toUpperCase(),
@@ -107,6 +112,63 @@ const signRequest = ({ method, url, headers, body, accessKeyId, secretAccessKey 
     authorization:
       `${algorithm} Credential=${accessKeyId}/${credentialScope}, ` +
       `SignedHeaders=${signedHeaders}, Signature=${signature}`,
+  };
+};
+
+const buildCanonicalQueryString = (searchParams) =>
+  [...searchParams.entries()]
+    .sort(([keyA, valueA], [keyB, valueB]) => {
+      if (keyA === keyB) return valueA.localeCompare(valueB);
+      return keyA.localeCompare(keyB);
+    })
+    .map(([key, value]) => `${encodeRfc3986(key)}=${encodeRfc3986(value)}`)
+    .join("&");
+
+const createPresignedPutUrl = ({ key, expiresIn = 300 }) => {
+  const config = getR2Config();
+  const url = new URL(`${config.endpoint}/${config.bucket}/${key}`);
+  const amzDate = formatAmzDate();
+  const dateStamp = formatDateStamp(amzDate);
+  const algorithm = "AWS4-HMAC-SHA256";
+  const credentialScope = `${dateStamp}/${R2_REGION}/${R2_SERVICE}/aws4_request`;
+  const signedHeaders = "host";
+
+  url.searchParams.set("X-Amz-Algorithm", algorithm);
+  url.searchParams.set("X-Amz-Credential", `${config.accessKeyId}/${credentialScope}`);
+  url.searchParams.set("X-Amz-Date", amzDate);
+  url.searchParams.set("X-Amz-Expires", String(expiresIn));
+  url.searchParams.set("X-Amz-SignedHeaders", signedHeaders);
+
+  const canonicalRequest = [
+    "PUT",
+    encodeS3Path(url.pathname),
+    buildCanonicalQueryString(url.searchParams),
+    `host:${url.host}\n`,
+    signedHeaders,
+    "UNSIGNED-PAYLOAD",
+  ].join("\n");
+
+  const stringToSign = [
+    algorithm,
+    amzDate,
+    credentialScope,
+    sha256Hex(canonicalRequest),
+  ].join("\n");
+
+  const signingKey = getSignatureKey(
+    config.secretAccessKey,
+    dateStamp,
+    R2_REGION,
+    R2_SERVICE,
+  );
+  const signature = crypto.createHmac("sha256", signingKey).update(stringToSign).digest("hex");
+  url.searchParams.set("X-Amz-Signature", signature);
+
+  return {
+    uploadUrl: url.toString(),
+    key,
+    url: `${config.publicBaseUrl}/${key}`,
+    expiresIn,
   };
 };
 
@@ -213,5 +275,6 @@ module.exports = {
   uploadBufferToR2,
   deleteObjectFromR2,
   decodeBase64File,
+  createPresignedPutUrl,
   sanitizeFileName,
 };
