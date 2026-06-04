@@ -1,4 +1,7 @@
 const { pool } = require("../config/db");
+const fs = require("fs/promises");
+const os = require("os");
+const path = require("path");
 const { v4: uuidv4 } = require("uuid");
 const {
   uploadBufferToR2,
@@ -10,6 +13,9 @@ const {
 const { recognizeKtp } = require("../utils/ktpOcr");
 
 const MAX_WITHDRAWAL_FILE_SIZE = 5 * 1024 * 1024;
+const MAX_WITHDRAWAL_CHUNK_SIZE = 768 * 1024;
+const WITHDRAWAL_UPLOAD_CHUNK_SIZE = 512 * 1024;
+const WITHDRAWAL_UPLOAD_DIR = path.join(os.tmpdir(), "brilink-withdrawal-uploads");
 const ALLOWED_MIME_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
 
 const parseAmount = (value) => {
@@ -45,6 +51,47 @@ const isValidWithdrawalR2File = ({ key, url }) => {
   if (!normalizedKey || !normalizedUrl) return false;
   if (!normalizedKey.startsWith("withdrawals/")) return false;
   return normalizedUrl === getPublicR2Url(normalizedKey);
+};
+
+const getChunkUploadDir = (uploadId) => {
+  if (!/^[0-9a-f-]{36}$/i.test(String(uploadId || ""))) {
+    const error = new Error("Upload ID tidak valid.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return path.join(WITHDRAWAL_UPLOAD_DIR, uploadId);
+};
+
+const getChunkUploadPaths = (uploadId) => {
+  const uploadDir = getChunkUploadDir(uploadId);
+  return {
+    uploadDir,
+    metaPath: path.join(uploadDir, "meta.json"),
+    dataPath: path.join(uploadDir, "ktp.bin"),
+  };
+};
+
+const readChunkUploadMeta = async (uploadId) => {
+  const { metaPath } = getChunkUploadPaths(uploadId);
+  const meta = JSON.parse(await fs.readFile(metaPath, "utf8"));
+  return meta;
+};
+
+const cleanupChunkUpload = async (uploadId) => {
+  const { uploadDir } = getChunkUploadPaths(uploadId);
+  await fs.rm(uploadDir, { recursive: true, force: true });
+};
+
+const decodeChunkData = (chunkData) => {
+  if (typeof chunkData !== "string" || !chunkData.trim()) {
+    const error = new Error("Data chunk KTP tidak valid.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const base64Content = chunkData.includes(",") ? chunkData.split(",").pop() : chunkData;
+  return Buffer.from(base64Content, "base64");
 };
 
 const validateAndDecodeKtpFile = ({ ktp_file_data }) => {
@@ -224,6 +271,123 @@ const createKtpUploadUrl = async (req, res) => {
     return res.status(500).json({
       message: "Gagal membuat URL upload KTP.",
       error: error.message,
+    });
+  }
+};
+
+const createKtpChunkUpload = async (req, res) => {
+  try {
+    const fileName = cleanText(req.body.ktp_file_name);
+    const mimeType = cleanText(req.body.ktp_mime_type);
+    const fileSize = Number(req.body.ktp_file_size || 0);
+
+    if (!fileName) {
+      return res.status(400).json({ message: "Nama file KTP harus diisi." });
+    }
+
+    if (!isAllowedMimeType(mimeType)) {
+      return res.status(400).json({ message: "Format foto KTP harus JPG, JPEG, PNG, atau WEBP." });
+    }
+
+    if (!Number.isFinite(fileSize) || fileSize <= 0 || fileSize > MAX_WITHDRAWAL_FILE_SIZE) {
+      return res.status(400).json({ message: "Ukuran foto KTP maksimal 5 MB." });
+    }
+
+    const uploadId = uuidv4();
+    const key = buildWithdrawalFileKey(fileName);
+    const { uploadDir, metaPath, dataPath } = getChunkUploadPaths(uploadId);
+    const meta = {
+      upload_id: uploadId,
+      ktp_file_name: fileName,
+      ktp_mime_type: mimeType,
+      ktp_file_size: fileSize,
+      ktp_file_key: key,
+      ktp_file_url: getPublicR2Url(key),
+      received_bytes: 0,
+      created_at: new Date().toISOString(),
+    };
+
+    await fs.mkdir(uploadDir, { recursive: true });
+    await fs.writeFile(metaPath, JSON.stringify(meta), "utf8");
+    await fs.writeFile(dataPath, Buffer.alloc(0));
+
+    return res.status(200).json({
+      upload_id: uploadId,
+      ktp_file_key: meta.ktp_file_key,
+      ktp_file_url: meta.ktp_file_url,
+      chunk_size: WITHDRAWAL_UPLOAD_CHUNK_SIZE,
+    });
+  } catch (error) {
+    console.error("Error creating KTP chunk upload:", error);
+    return res.status(error.statusCode || 500).json({
+      message: error.message || "Gagal memulai upload KTP.",
+    });
+  }
+};
+
+const appendKtpChunkUpload = async (req, res) => {
+  const { uploadId } = req.params;
+
+  try {
+    const meta = await readChunkUploadMeta(uploadId);
+    const { metaPath, dataPath } = getChunkUploadPaths(uploadId);
+    const chunkBuffer = decodeChunkData(req.body.chunk_data);
+
+    if (chunkBuffer.length === 0 || chunkBuffer.length > MAX_WITHDRAWAL_CHUNK_SIZE) {
+      return res.status(400).json({ message: "Ukuran chunk KTP tidak valid." });
+    }
+
+    const nextReceivedBytes = Number(meta.received_bytes || 0) + chunkBuffer.length;
+    if (nextReceivedBytes > Number(meta.ktp_file_size)) {
+      return res.status(400).json({ message: "Ukuran upload KTP melebihi file asli." });
+    }
+
+    await fs.appendFile(dataPath, chunkBuffer);
+    meta.received_bytes = nextReceivedBytes;
+    await fs.writeFile(metaPath, JSON.stringify(meta), "utf8");
+
+    return res.status(200).json({
+      upload_id: uploadId,
+      received_bytes: meta.received_bytes,
+      ktp_file_size: meta.ktp_file_size,
+    });
+  } catch (error) {
+    console.error("Error appending KTP chunk upload:", error);
+    return res.status(error.statusCode || 500).json({
+      message: error.message || "Gagal mengunggah chunk KTP.",
+    });
+  }
+};
+
+const completeKtpChunkUpload = async (req, res) => {
+  const { uploadId } = req.params;
+
+  try {
+    const meta = await readChunkUploadMeta(uploadId);
+    const { dataPath } = getChunkUploadPaths(uploadId);
+    const fileStat = await fs.stat(dataPath);
+
+    if (fileStat.size !== Number(meta.ktp_file_size)) {
+      return res.status(400).json({ message: "Upload KTP belum lengkap." });
+    }
+
+    const buffer = await fs.readFile(dataPath);
+    const uploaded = await uploadBufferToR2({
+      key: meta.ktp_file_key,
+      buffer,
+      contentType: meta.ktp_mime_type,
+    });
+
+    await cleanupChunkUpload(uploadId);
+
+    return res.status(200).json({
+      ktp_file_key: uploaded.key,
+      ktp_file_url: uploaded.url,
+    });
+  } catch (error) {
+    console.error("Error completing KTP chunk upload:", error);
+    return res.status(error.statusCode || 500).json({
+      message: error.message || "Gagal menyelesaikan upload KTP.",
     });
   }
 };
@@ -572,6 +736,9 @@ const deleteWithdrawal = async (req, res) => {
 module.exports = {
   ocrKtp,
   createKtpUploadUrl,
+  createKtpChunkUpload,
+  appendKtpChunkUpload,
+  completeKtpChunkUpload,
   createWithdrawal,
   getAllWithdrawals,
   getWithdrawalById,
