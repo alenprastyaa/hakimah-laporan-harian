@@ -18,10 +18,7 @@ const { startWhatsappReportScheduler } = require("./services/whatsappReportSched
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-// Middleware
-app.use(express.json({ limit: "10mb" })); // Body parser untuk JSON
-app.use(express.urlencoded({ extended: true, limit: "10mb" })); // Body parser untuk URL-encoded
+const BODY_LIMIT = process.env.BODY_LIMIT || "25mb";
 
 // Konfigurasi CORS yang lebih komprehensif
 const corsOptions = {
@@ -86,6 +83,10 @@ app.use((req, res, next) => {
 
   next();
 });
+
+// Middleware
+app.use(express.json({ limit: BODY_LIMIT })); // Body parser untuk JSON
+app.use(express.urlencoded({ extended: true, limit: BODY_LIMIT })); // Body parser untuk URL-encoded
 
 // Definisikan rute API
 app.use("/api/users", userRoutes);

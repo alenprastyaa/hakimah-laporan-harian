@@ -97,6 +97,52 @@ const buildKtpFields = (body, ocrFields) => ({
   ktp_address: cleanText(body.ktp_address) || ocrFields.ktp_address,
 });
 
+const updateWithdrawalOcr = async (withdrawalId, buffer, body) => {
+  try {
+    const ocrFields = await scanKtp(buffer);
+    const ktpFields = buildKtpFields(body, ocrFields);
+
+    await pool.query(
+      `
+      UPDATE withdrawals
+      SET
+        ktp_ocr_status = ?,
+        ktp_ocr_text = ?,
+        ktp_ocr_error = ?,
+        ktp_nik = ?,
+        ktp_name = ?,
+        ktp_birth_place = ?,
+        ktp_birth_date = ?,
+        ktp_gender = ?,
+        ktp_address = ?
+      WHERE withdrawal_id = ?
+      `,
+      [
+        ktpFields.ktp_ocr_status || "failed",
+        ktpFields.ktp_ocr_text,
+        ktpFields.ktp_ocr_error?.slice(0, 500) || null,
+        ktpFields.ktp_nik,
+        ktpFields.ktp_name,
+        ktpFields.ktp_birth_place,
+        ktpFields.ktp_birth_date,
+        ktpFields.ktp_gender,
+        ktpFields.ktp_address,
+        withdrawalId,
+      ],
+    );
+  } catch (error) {
+    console.error("Error updating withdrawal OCR:", error);
+    await pool.query(
+      `
+      UPDATE withdrawals
+      SET ktp_ocr_status = ?, ktp_ocr_error = ?
+      WHERE withdrawal_id = ?
+      `,
+      ["failed", (error.message || "Gagal memproses OCR KTP.").slice(0, 500), withdrawalId],
+    );
+  }
+};
+
 const ocrKtp = async (req, res) => {
   try {
     const decodedFile = validateAndDecodeKtpFile(req.body);
@@ -156,7 +202,12 @@ const createWithdrawal = async (req, res) => {
       req.body.ktp_birth_date ||
       req.body.ktp_gender ||
       req.body.ktp_address;
-    const ocrFields = hasOcrPayload ? {} : await scanKtp(decodedFile.buffer);
+    const ocrFields = hasOcrPayload
+      ? {}
+      : {
+          ktp_ocr_status: "pending",
+          ktp_name: String(withdrawal_name).trim(),
+        };
     const ktpFields = buildKtpFields(req.body, ocrFields);
 
     const uploaded = await uploadBufferToR2({
@@ -208,7 +259,7 @@ const createWithdrawal = async (req, res) => {
       ],
     );
 
-    return res.status(201).json({
+    const responsePayload = {
       message: "Tarik uang berhasil dibuat.",
       withdrawal: {
         withdrawal_id: withdrawalId,
@@ -229,7 +280,20 @@ const createWithdrawal = async (req, res) => {
         created_at: createdAt,
         created_by: createdBy,
       },
-    });
+    };
+
+    if (!hasOcrPayload) {
+      setImmediate(() => {
+        updateWithdrawalOcr(withdrawalId, decodedFile.buffer, {
+          ...req.body,
+          withdrawal_name: String(withdrawal_name).trim(),
+        }).catch((error) => {
+          console.error("Unhandled withdrawal OCR update error:", error);
+        });
+      });
+    }
+
+    return res.status(201).json(responsePayload);
   } catch (error) {
     console.error("Error creating withdrawal:", error);
     try {
