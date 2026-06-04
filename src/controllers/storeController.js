@@ -48,11 +48,9 @@ const createStore = async (req, res) => {
         });
       }
 
-      // Generate UUID for store_employee record
-      const store_employee_id = uuidv4();
       await connection.query(
-        "INSERT INTO store_employees (store_employee_id, store_id, user_id) VALUES (?, ?, ?)",
-        [store_employee_id, store_id, userId]
+        "INSERT INTO store_employees (store_id, user_id) VALUES (?, ?)",
+        [store_id, userId]
       );
     }
 
@@ -224,11 +222,9 @@ const updateStore = async (req, res) => {
           });
         }
 
-        // Generate UUID for new store_employee record
-        const store_employee_id = uuidv4();
         await connection.query(
-          "INSERT INTO store_employees (store_employee_id, store_id, user_id) VALUES (?, ?, ?)",
-          [store_employee_id, id, userId]
+          "INSERT INTO store_employees (store_id, user_id) VALUES (?, ?)",
+          [id, userId]
         );
       }
     }
