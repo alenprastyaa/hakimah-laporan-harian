@@ -126,7 +126,7 @@ const buildCanonicalQueryString = (searchParams) =>
 
 const createPresignedPutUrl = ({ key, expiresIn = 300 }) => {
   const config = getR2Config();
-  const url = new URL(`${config.publicBaseUrl}/${key}`);
+  const url = new URL(`${config.endpoint}/${config.bucket}/${key}`);
   const amzDate = formatAmzDate();
   const dateStamp = formatDateStamp(amzDate);
   const algorithm = "AWS4-HMAC-SHA256";
