@@ -20,6 +20,66 @@ const addColumnIfMissing = async (tableName, columnName, columnDefinition) => {
 
 const initializeDatabase = async () => {
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS deposit_recipients (
+      recipient_id CHAR(36) NOT NULL,
+      name VARCHAR(150) NOT NULL,
+      is_active TINYINT(1) NOT NULL DEFAULT 1,
+      created_by CHAR(36) NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (recipient_id),
+      KEY idx_deposit_recipients_is_active (is_active),
+      KEY idx_deposit_recipients_name (name),
+      CONSTRAINT fk_deposit_recipients_created_by
+        FOREIGN KEY (created_by) REFERENCES users (user_id)
+        ON DELETE SET NULL
+        ON UPDATE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS deposits (
+      deposit_id CHAR(36) NOT NULL,
+      amount DECIMAL(15,2) NOT NULL,
+      store_id CHAR(36) NULL,
+      recipient_id CHAR(36) NOT NULL,
+      created_by CHAR(36) NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (deposit_id),
+      KEY idx_deposits_store_id (store_id),
+      KEY idx_deposits_recipient_id (recipient_id),
+      KEY idx_deposits_created_by (created_by),
+      KEY idx_deposits_created_at (created_at),
+      CONSTRAINT fk_deposits_store_id
+        FOREIGN KEY (store_id) REFERENCES stores (store_id)
+        ON DELETE RESTRICT
+        ON UPDATE CASCADE,
+      CONSTRAINT fk_deposits_recipient_id
+        FOREIGN KEY (recipient_id) REFERENCES deposit_recipients (recipient_id)
+        ON DELETE RESTRICT
+        ON UPDATE CASCADE,
+      CONSTRAINT fk_deposits_created_by
+        FOREIGN KEY (created_by) REFERENCES users (user_id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+  `);
+
+  await addColumnIfMissing("deposits", "store_id", "CHAR(36) NULL");
+
+  await pool.query(`
+    UPDATE deposits d
+    JOIN (
+      SELECT user_id, MIN(store_id) AS store_id, COUNT(DISTINCT store_id) AS store_count
+      FROM store_employees
+      GROUP BY user_id
+    ) assigned_store ON assigned_store.user_id = d.created_by
+    SET d.store_id = assigned_store.store_id
+    WHERE d.store_id IS NULL
+      AND assigned_store.store_count = 1
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS withdrawals (
       withdrawal_id CHAR(36) NOT NULL,
       withdrawal_name VARCHAR(150) NOT NULL,

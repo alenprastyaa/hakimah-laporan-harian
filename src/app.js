@@ -13,6 +13,7 @@ const storeRoutes = require("./routes/storeRoutes");
 const bankRoutes = require("./routes/bankRoutes");
 const reportRoutes = require("./routes/reportRoutes");
 const withdrawalRoutes = require("./routes/withdrawalRoutes");
+const depositRoutes = require("./routes/depositRoutes");
 const whatsappReportRoutes = require("./routes/whatsappReportRoutes");
 const { startWhatsappReportScheduler } = require("./services/whatsappReportScheduler");
 
@@ -94,6 +95,7 @@ app.use("/api/stores", storeRoutes);
 app.use("/api/banks", bankRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/withdrawals", withdrawalRoutes);
+app.use("/api/deposits", depositRoutes);
 app.use("/api/whatsapp-reports", whatsappReportRoutes);
 
 // Rute dasar
