@@ -2,7 +2,7 @@
 const jwt = require("jsonwebtoken");
 require("dotenv").config();
 
-const verifyToken = (req, res, next) => {
+const verifyToken = async (req, res, next) => {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
 
@@ -14,12 +14,29 @@ const verifyToken = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
+    const { pool } = require("../config/db");
+    const [users] = await pool.query(
+      "SELECT user_id, username, role FROM users WHERE user_id = ? LIMIT 1",
+      [decoded.user_id]
+    );
+
+    if (users.length === 0) {
+      return res
+        .status(401)
+        .json({ message: "Sesi tidak valid. Silakan login kembali." });
+    }
+
+    req.user = {
+      ...decoded,
+      user_id: users[0].user_id,
+      username: users[0].username,
+      role: users[0].role,
+    };
     next();
   } catch (error) {
     console.error("Token verification error:", error);
     return res
-      .status(403)
+      .status(401)
       .json({ message: "Token tidak valid atau kedaluwarsa." });
   }
 };
